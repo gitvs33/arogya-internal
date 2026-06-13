@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MedOS Internal — Architecture Review</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+    body { font-family: 'Inter', sans-serif; }
+    code, pre { font-family: 'JetBrains Mono', monospace; }
+    .card { @apply bg-white rounded-xl border border-gray-200 p-6; }
+    .badge-strong { @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-700; }
+    .badge-worth { @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-700; }
+    .badge-speculative { @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-gray-100 text-gray-600; }
+    .file { @apply font-mono text-sm bg-gray-100 px-1.5 py-0.5 rounded; }
+    .mermaid-container { background: #f8fafc; border-radius: 0.75rem; padding: 1rem; }
+  </style>
+</head>
+<body class="bg-gray-50 text-gray-900 antialiased">
+
+  <div class="max-w-5xl mx-auto px-4 py-12">
+    <!-- Header -->
+    <div class="mb-10">
+      <div class="flex items-center gap-3 mb-2">
+        <span class="text-xs font-semibold bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full">2026-06-11</span>
+        <span class="text-xs font-semibold bg-[#0A6253]/10 text-[#0A6253] px-2 py-0.5 rounded-full">v2</span>
+      </div>
+      <h1 class="text-3xl font-bold text-gray-900">MedOS Internal — Architecture Review</h1>
+      <p class="text-gray-500 mt-2 text-lg">Deepening opportunities after 4 rounds of refactoring</p>
+    </div>
+
+    <!-- Context summary -->
+    <div class="card mb-8">
+      <h2 class="font-semibold text-gray-900 mb-3">What's changed since v1</h2>
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+        <div class="bg-emerald-50 rounded-lg p-3 border border-emerald-200">
+          <div class="font-semibold text-emerald-700">11 → 3</div>
+          <div class="text-emerald-600">Dashboard endpoints collapsed</div>
+        </div>
+        <div class="bg-emerald-50 rounded-lg p-3 border border-emerald-200">
+          <div class="font-semibold text-emerald-700">9 ViewSets</div>
+          <div class="text-emerald-600">Replaced by factory</div>
+        </div>
+        <div class="bg-emerald-50 rounded-lg p-3 border border-emerald-200">
+          <div class="font-semibold text-emerald-700">Hospital scoping</div>
+          <div class="text-emerald-600">Now actually works</div>
+        </div>
+        <div class="bg-emerald-50 rounded-lg p-3 border border-emerald-200">
+          <div class="font-semibold text-emerald-700">7-day TTL</div>
+          <div class="text-emerald-600">Tokens now expire</div>
+        </div>
+      </div>
+      <div class="mt-3 text-sm text-gray-500">
+        <span class="font-medium">New baseline:</span> 417-line views.py · 176-line serializers.py · 84-line admin_crud.py · 31 tests
+      </div>
+    </div>
+
+    <!-- ── CANDIDATE 1 ── -->
+    <div class="card mb-6">
+      <div class="flex items-start justify-between mb-4">
+        <div>
+          <span class="badge-strong">Strong</span>
+          <h2 class="text-xl font-bold mt-2">Duplicate <code>platform_stats</code> view</h2>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-2 gap-6 mb-4">
+        <div>
+          <h3 class="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-2">Files</h3>
+          <ul class="space-y-1 text-sm">
+            <li><span class="file">views.py</span> — <code>platform_stats</code> function (lines 237–267)</li>
+            <li><span class="file">services/dashboard.py</span> — <code>_read_kpis()</code> returns superset</li>
+            <li><span class="file">frontend/src/pages/Stats.tsx</span> — consumer of <code>platform_stats</code></li>
+            <li><span class="file">frontend/src/api/internalApi.ts</span> — <code>getStats()</code> method</li>
+          </ul>
+        </div>
+        <div>
+          <h3 class="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-2">The numbers</h3>
+          <ul class="space-y-1 text-sm">
+            <li><span class="font-medium">platform_stats:</span> 8 raw KPIs, 6 direct queries</li>
+            <li><span class="font-medium">read_overview():</span> 6 top-level keys including the same 8 KPIs</li>
+            <li><span class="font-medium">Leverage:</span> 0 — the view duplicates query logic</li>
+          </ul>
+        </div>
+      </div>
+
+      <h3 class="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-2">Problem</h3>
+      <p class="text-sm text-gray-700 mb-4">
+        The <code class="file">platform_stats</code> view function makes <strong>6 direct database queries</strong> (<code>Hospital.objects.count()</code>,
+        <code>UserLoginActivity.objects.filter(...)</code>, etc.) that produce a flat 8-key response. Exactly the same
+        KPIs — plus module status, storage, license info, system info, and security — are already returned by
+        <code class="file">dashboard_service.read_overview()['kpis']</code>. The view is a <strong>shallower duplicate</strong>:
+        its interface (flat list of 8 numbers) is nearly as complex as its implementation (6 queries).
+      </p>
+
+      <h3 class="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-2">Solution</h3>
+      <p class="text-sm text-gray-700 mb-4">
+        Replace the 6 direct queries with a single delegation to <code class="file">dashboard_service.read_overview()</code>.
+        Extract the <code>'kpis'</code> key and return it. The view becomes a 3-line adapter — query logic lives
+        in one place (the service) instead of two.
+      </p>
+
+      <h3 class="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-2">Benefits</h3>
+      <ul class="text-sm text-gray-700 space-y-1 mb-4 list-disc list-inside">
+        <li><strong>Locality:</strong> change the KPI definition in one place, not two</li>
+        <li><strong>Test surface:</strong> tests for KPIs already exist in <code>test_dashboard_service.py</code> — no new test needed</li>
+        <li><strong>Deletion test:</strong> delete the <code>platform_stats</code> function, the frontend is unchanged</li>
+      </ul>
+
+      <div class="mermaid-container">
+        <div class="mermaid">
+graph LR
+    subgraph Before
+        FS[Stats.tsx] --> PV[platform_stats]
+        PV --> Q1[Hospital.count]
+        PV --> Q2[UserLoginActivity.count]
+        PV --> Q3[User.count]
+        PV --> Q4[Patient.count]
+        PV --> Q5[Encounter.count]
+        PV --> Q6[Invoice.count]
+    end
+    subgraph After
+        FS2[Stats.tsx] --> PV2[platform_stats]
+        PV2 --> DS[dashboard_service.read_overview]
+        DS --> KPIS[_read_kpis<br/>already tested]
+    end
+        </div>
+      </div>
+    </div>
+
+    <!-- ── CANDIDATE 2 ── -->
+    <div class="card mb-6">
+      <div class="flex items-start justify-between mb-4">
+        <div>
+          <span class="badge-strong">Strong</span>
+          <h2 class="text-xl font-bold mt-2">Dashboard endpoints have no frontend consumer</h2>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-2 gap-6 mb-4">
+        <div>
+          <h3 class="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-2">Files</h3>
+          <ul class="space-y-1 text-sm">
+            <li><span class="file">urls.py</span> — 3 admin/dashboard/ paths</li>
+            <li><span class="file">views.py</span> — 3 adapter views (admin_overview, etc.)</li>
+            <li><span class="file">services/dashboard.py</span> — query logic</li>
+            <li><span class="file">frontend/src/api/internalApi.ts</span> — no dashboard methods</li>
+          </ul>
+        </div>
+        <div>
+          <h3 class="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-2">The numbers</h3>
+          <ul class="space-y-1 text-sm">
+            <li><span class="font-medium">Backend depth:</span> 3 composite endpoints behind a service</li>
+            <li><span class="font-medium">Frontend consumption:</span> 0 API calls</li>
+            <li><span class="font-medium">One-adapter seam:</span> the service has exactly 1 adapter (the views)</li>
+          </ul>
+        </div>
+      </div>
+
+      <h3 class="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-2">Problem</h3>
+      <p class="text-sm text-gray-700 mb-4">
+        The 3 composite dashboard endpoints (<code>admin/dashboard/overview/</code>, <code>/activity/</code>, <code>/alerts/</code>)
+        exist only on the backend. The frontend has no code to call them, no React pages that render their data,
+        and no <code>internalApi.ts</code> methods. Until a frontend consumer exists, the endpoints are
+        <strong>dead code</strong> — the service seam isn't earning its keep.
+      </p>
+
+      <h3 class="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-2">Solution</h3>
+      <p class="text-sm text-gray-700 mb-4">
+        Either build the dashboard frontend (pages + API methods) that consumes them, or remove the endpoints.
+        A middle-ground: expose the service results through <code>internalApi.ts</code> so future frontend work
+        has a contract to implement against.
+      </p>
+
+      <h3 class="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-2">Benefits</h3>
+      <ul class="text-sm text-gray-700 space-y-1 mb-4 list-disc list-inside">
+        <li><strong>Leverage:</strong> the dashboard service's depth is only realised when a caller uses it</li>
+        <li><strong>Deletion test:</strong> delete the 3 views + 3 URL patterns and nothing breaks</li>
+        <li><strong>Two-adapter test:</strong> adding a frontend consumer makes the seam real</li>
+      </ul>
+    </div>
+
+    <!-- ── CANDIDATE 3 ── -->
+    <div class="card mb-6">
+      <div class="flex items-start justify-between mb-4">
+        <div>
+          <span class="badge-worth">Worth exploring</span>
+          <h2 class="text-xl font-bold mt-2">Lazy <code>User</code> import at bottom of dashboard.py</h2>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-2 gap-6 mb-4">
+        <div>
+          <h3 class="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-2">Files</h3>
+          <ul class="space-y-1 text-sm">
+            <li><span class="file">services/dashboard.py</span> — line 189</li>
+          </ul>
+        </div>
+        <div>
+          <h3 class="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-2">The smell</h3>
+          <ul class="space-y-1 text-sm">
+            <li><code>User</code> is used at lines 55, 60, 84, 87, 230, 243</li>
+            <li>But defined at line 189 via <code>get_user_model()</code></li>
+            <li>Works because Python resolves at call time, not definition time</li>
+          </ul>
+        </div>
+      </div>
+
+      <h3 class="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-2">Problem</h3>
+      <p class="text-sm text-gray-700 mb-4">
+        <code class="file">dashboard.py</code> calls <code>get_user_model()</code> and assigns to <code>User</code> at the
+        <strong>very bottom of the file</strong> (line 189). Functions above it (<code>_read_kpis</code>,
+        <code>_read_user_activity</code>) reference <code>User</code> freely. In CPython this works because
+        function bodies aren't evaluated until call time — but it's confusing, fragile, and triggers a
+        <code>NameError</code> if any function is accidentally called at module load time.
+      </p>
+
+      <h3 class="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-2">Solution</h3>
+      <p class="text-sm text-gray-700 mb-4">
+        Move the import to the top of the file. The circular import comment at line 188 says
+        <em>"Late import to avoid circular dependency"</em> — but <code class="file">models.py</code>
+        doesn't import from <code class="file">dashboard.py</code>, and <code class="file">views.py</code>
+        imports both <code>models</code> and <code>dashboard</code> (not the reverse). The circular
+        dependency doesn't exist — the lazy import is cargo-culted.
+      </p>
+
+      <h3 class="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-2">Benefits</h3>
+      <ul class="text-sm text-gray-700 space-y-1 mb-4 list-disc list-inside">
+        <li><strong>Clarity:</strong> <code>User</code> is defined before it's used</li>
+        <li><strong>Safety:</strong> no runtime <code>NameError</code> risk from module-level evaluation</li>
+      </ul>
+    </div>
+
+    <!-- ── CANDIDATE 4 ── -->
+    <div class="card mb-6">
+      <div class="flex items-start justify-between mb-4">
+        <div>
+          <span class="badge-worth">Worth exploring</span>
+          <h2 class="text-xl font-bold mt-2">No frontend tests</h2>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-2 gap-6 mb-4">
+        <div>
+          <h3 class="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-2">Files</h3>
+          <ul class="space-y-1 text-sm">
+            <li><span class="file">frontend/</span> — no <code>__tests__</code> dir</li>
+            <li><span class="file">package.json</span> — no test script</li>
+            <li><span class="file">vite.config.ts</span> — no test framework</li>
+          </ul>
+        </div>
+        <div>
+          <h3 class="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-2">The gap</h3>
+          <ul class="space-y-1 text-sm">
+            <li>31 backend tests (dashboard service)</li>
+            <li>0 frontend tests (pages, API client, auth)</li>
+            <li>Frontend pages have conditional rendering (<code>isLoading</code>, <code>isError</code>) that's never tested</li>
+          </ul>
+        </div>
+      </div>
+
+      <h3 class="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-2">Problem</h3>
+      <p class="text-sm text-gray-700 mb-4">
+        The frontend is the primary consumer of every backend endpoint. The <strong>Stats.tsx</strong> page renders
+        6 stat cards from <code>platform_stats</code> — but there's no test that the 6 cards render correctly,
+        that loading state shows skeletons, or that an error state shows a fallback. The <strong>response interceptor</strong>
+        in <code>client.ts</code> redirects to <code>/login</code> on 401 — never tested.
+      </p>
+
+      <h3 class="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-2">Solution</h3>
+      <p class="text-sm text-gray-700 mb-4">
+        Add Vitest (native to Vite ecosystem) with React Testing Library. Start with the simplest seam:
+        the <code>internalApi</code> module's response types. Then add component tests for <code>Stats.tsx</code>
+        (loading/error/success states) and the auth interceptor in <code>client.ts</code>.
+      </p>
+
+      <h3 class="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-2">Benefits</h3>
+      <ul class="text-sm text-gray-700 space-y-1 mb-4 list-disc list-inside">
+        <li><strong>Locality:</strong> frontend bugs caught before hitting the browser</li>
+        <li><strong>Leverage:</strong> the Stats page's data flow is fully covered in one place</li>
+      </ul>
+    </div>
+
+    <!-- ── CANDIDATE 5 ── -->
+    <div class="card mb-6">
+      <div class="flex items-start justify-between mb-4">
+        <div>
+          <span class="badge-speculative">Speculative</span>
+          <h2 class="text-xl font-bold mt-2">StorageMetrics FK mismatch</h2>
+        </div>
+      </div>
+
+      <h3 class="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-2">Files</h3>
+      <ul class="space-y-1 text-sm mb-4">
+        <li><span class="file">models.py</span> — <code>StorageMetrics.hospital</code> field (line 290)</li>
+      </ul>
+
+      <h3 class="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-2">Problem</h3>
+      <p class="text-sm text-gray-700 mb-4">
+        <code>StorageMetrics.hospital = ForeignKey(Hospital, null=True, blank=True)</code> without
+        <code>db_constraint=False</code>. The FK references an unmanaged model (<code>Hospital</code> with
+        <code>managed = False</code>). In test environments (SQLite), the FK constraint works because we
+        create the table manually — but in a clean PostgreSQL test DB it could fail during <code>syncdb</code>.
+        The <code>null=True</code> also allows orphaned records unassociated with any hospital.
+      </p>
+
+      <h3 class="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-2">Solution</h3>
+      <p class="text-sm text-gray-700 mb-4">
+        Add <code>db_constraint=False</code> to the FK. This makes the constraint logical (enforced by Django)
+        rather than physical (enforced by PostgreSQL), matching the pattern used by all unmanaged models'
+        FKs to <code>Hospital</code> elsewhere in this codebase.
+      </p>
+    </div>
+
+    <!-- ── CANDIDATE 6 ── -->
+    <div class="card mb-6">
+      <div class="flex items-start justify-between mb-4">
+        <div>
+          <span class="badge-speculative">Speculative</span>
+          <h2 class="text-xl font-bold mt-2">Mixed GET/POST in <code>hospital_list</code></h2>
+        </div>
+      </div>
+
+      <h3 class="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-2">Files</h3>
+      <ul class="space-y-1 text-sm mb-4">
+        <li><span class="file">views.py</span> — <code>hospital_list</code> function (lines 73–155)</li>
+      </ul>
+
+      <h3 class="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-2">Problem</h3>
+      <p class="text-sm text-gray-700 mb-4">
+        The <code>hospital_list</code> view handles both GET (list hospitals) and POST (create hospital)
+        in a single function with <code>if request.method == 'GET':</code> branching. The body is 82 lines
+        with two very different responsibilities — listing is a simple annotated query, creating is a
+        10-step transactional workflow. This makes the function harder to read, test, and modify.
+      </p>
+
+      <h3 class="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-2">Solution</h3>
+      <p class="text-sm text-gray-700 mb-4">
+        Split into two views: <code>hospital_list</code> (GET only) and <code>hospital_create</code>
+        (POST only), each with its own URL pattern. The create logic could then be extracted into a
+        <code>HospitalOnboardingService</code> module, making the transactional workflow independently testable.
+      </p>
+
+      <h3 class="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-2">Why speculative</h3>
+      <p class="text-sm text-gray-700 mb-4">
+        The mixed method pattern is common in Django REST Framework and isn't inherently wrong.
+        The deeper opportunity (extracting the onboarding workflow into a service) is worth exploring
+        but depends on whether the onboarding logic is expected to grow.
+      </p>
+    </div>
+
+    <!-- ── TOP RECOMMENDATION ── -->
+    <div class="card border-emerald-300 bg-emerald-50">
+      <div class="flex items-center gap-2 mb-3">
+        <span class="text-emerald-600 font-bold text-sm uppercase tracking-wider">Top recommendation</span>
+      </div>
+      <h2 class="text-xl font-bold text-emerald-900 mb-2">Fix the <code>platform_stats</code> duplication first</h2>
+      <p class="text-emerald-800 text-sm">
+        The <code>platform_stats</code> view is the clearest <strong>shallowness</strong> in the current codebase:
+        its interface (a flat list of 8 numbers) is nearly as complex as its implementation (6 direct queries).
+        The same KPIs already exist behind a service seam (<code>dashboard_service.read_overview()['kpis']</code>)
+        with 6 passing tests. Delegating eliminates the duplication, shrinks the view to 3 lines, and makes the
+        service seam earn its keep. It's a 5-minute change with zero risk.
+      </p>
+      <p class="text-emerald-700 text-sm mt-2">
+        Second: add a frontend consumer for the 3 dashboard endpoints (Candidate 2) — otherwise the service
+        seam we created in the last refactor is still one-adapter speculation.
+      </p>
+    </div>
+
+  </div>
+
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({ startOnLoad: true, theme: 'neutral', fontFamily: 'Inter' });
+  </script>
+
+</body>
+</html>

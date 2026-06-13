@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Architecture Review — medos_internal_frontend Round 3</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { background: #f8fafc; }
+    .card { transition: box-shadow 0.2s; }
+    .card:hover { box-shadow: 0 4px 16px rgba(0,0,0,0.08); }
+    .badge-strong { background: #dcfce7; color: #166534; }
+    .badge-explore { background: #fef9c3; color: #854d0e; }
+    .badge-speculative { background: #f3f4f6; color: #4b5563; }
+    .file { font-family: 'Fira Code', 'JetBrains Mono', monospace; font-size: 0.75rem; }
+    .diagram-box { background: #f1f5f9; border-radius: 0.75rem; padding: 1.5rem; }
+  </style>
+</head>
+<body>
+  <div class="max-w-5xl mx-auto px-4 py-10">
+
+    <!-- Header -->
+    <div class="mb-10">
+      <div class="flex items-center gap-3 mb-2">
+        <span class="text-xs font-medium bg-gray-200 text-gray-700 px-2.5 py-1 rounded-full">Round 3</span>
+        <span class="text-xs font-medium bg-emerald-100 text-emerald-700 px-2.5 py-1 rounded-full">Exploring</span>
+      </div>
+      <h1 class="text-3xl font-bold text-gray-900">Architecture Review</h1>
+      <p class="text-gray-500 mt-1">medos_internal_frontend · 2026-06-11</p>
+      <p class="text-gray-400 text-sm mt-3 max-w-2xl">
+        After the Round 2 deep refactors (composite dashboard endpoints, admin CRUD factory, 
+        onboarding service, token expiry, FK hygiene, error boundary, toast system, 
+        and integration tests), this round explores the <strong>remaining shallows</strong> — 
+        places where the architecture has not yet caught up with the deepening of the rest.
+      </p>
+      <div class="mt-4 flex items-center gap-6 text-sm text-gray-500">
+        <span>55 backend tests · 29 frontend tests · 0 failures</span>
+        <span>361 views.py · 176 serializers.py · 533 services/</span>
+      </div>
+    </div>
+
+    <!-- ── CANDIDATE 1 ──────────────────────────────────────────────────── -->
+    <div class="card bg-white rounded-2xl border border-gray-200 p-6 mb-6">
+      <div class="flex items-start justify-between mb-4">
+        <div>
+          <span class="badge-strong text-xs font-semibold px-3 py-1 rounded-full">Strong</span>
+          <h2 class="text-xl font-bold text-gray-900 mt-2">Dashboard API endpoint paths are wrong</h2>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 lg:grid-cols-5 gap-4 mb-5">
+        <div class="lg:col-span-2 space-y-3">
+          <div>
+            <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide">Files</p>
+            <div class="mt-1 space-y-1">
+              <span class="file inline-block bg-gray-100 text-gray-700 px-2 py-0.5 rounded">frontend/src/api/internalApi.ts</span>
+            </div>
+          </div>
+          <div>
+            <p class="text-xs font-semibold text-red-500 uppercase tracking-wide">Problem</p>
+            <p class="text-sm text-gray-700 mt-1">
+              The three dashboard API methods use paths like <code class="text-red-600 bg-red-50 px-1 rounded">/admin/dashboard/overview/</code> 
+              instead of <code class="text-green-600 bg-green-50 px-1 rounded">/internal/admin/dashboard/overview/</code>. 
+              With Axios base URL <code>/api</code>, the resulting HTTP request 
+              (<code>/api/admin/dashboard/overview/</code>) returns 404. The 
+              AdminDashboard page shows its error state and never displays data.
+            </p>
+          </div>
+          <div>
+            <p class="text-xs font-semibold text-green-600 uppercase tracking-wide">Solution</p>
+            <p class="text-sm text-gray-700 mt-1">
+              Add <code>/internal</code> prefix to all three dashboard endpoint paths.
+            </p>
+          </div>
+        </div>
+        <div class="lg:col-span-3">
+          <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Before / After</p>
+          <div class="diagram-box">
+            <div class="grid grid-cols-2 gap-4">
+              <!-- Before -->
+              <div class="bg-white rounded-lg p-4 border border-red-200">
+                <p class="text-xs font-semibold text-red-600 mb-2">✗ Current</p>
+                <div class="text-xs space-y-1 font-mono">
+                  <p class="text-gray-500">// internalApi.ts</p>
+                  <p class="text-red-600">get('/admin/dashboard/overview/')</p>
+                  <p class="text-gray-400">→ <span class="text-red-500">/api/admin/dashboard/overview/</span></p>
+                  <p class="text-red-500">✗ 404 Not Found</p>
+                </div>
+              </div>
+              <!-- After -->
+              <div class="bg-white rounded-lg p-4 border border-emerald-200">
+                <p class="text-xs font-semibold text-emerald-600 mb-2">✓ Fixed</p>
+                <div class="text-xs space-y-1 font-mono">
+                  <p class="text-gray-500">// internalApi.ts</p>
+                  <p class="text-emerald-600">get('/<strong>internal</strong>/admin/dashboard/overview/')</p>
+                  <p class="text-gray-400">→ <span class="text-emerald-500">/api/internal/admin/dashboard/overview/</span></p>
+                  <p class="text-emerald-600">✓ 200 OK</p>
+                </div>
+              </div>
+            </div>
+            <div class="mt-3 text-xs text-gray-400">
+              <strong>Why it's wrong:</strong> Every other API method in <code>internalApi.ts</code> uses 
+              the <code>/internal/...</code> prefix. These three don't — likely a copy-paste omission 
+              from when the old 11 flat endpoints were collapsed into 3 composite ones.
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── CANDIDATE 2 ──────────────────────────────────────────────────── -->
+    <div class="card bg-white rounded-2xl border border-gray-200 p-6 mb-6">
+      <div class="flex items-start justify-between mb-4">
+        <div>
+          <span class="badge-explore text-xs font-semibold px-3 py-1 rounded-full">Worth exploring</span>
+          <h2 class="text-xl font-bold text-gray-900 mt-2">Query logic split between serializers and services</h2>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 lg:grid-cols-5 gap-4 mb-5">
+        <div class="lg:col-span-2 space-y-3">
+          <div>
+            <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide">Files</p>
+            <div class="mt-1 space-y-1">
+              <span class="file inline-block bg-gray-100 text-gray-700 px-2 py-0.5 rounded">backend/medos_internal/serializers.py</span>
+              <span class="file inline-block bg-gray-100 text-gray-700 px-2 py-0.5 rounded">backend/medos_internal/services/dashboard.py</span>
+              <span class="file inline-block bg-gray-100 text-gray-700 px-2 py-0.5 rounded">backend/medos_internal/views.py</span>
+            </div>
+          </div>
+          <div>
+            <p class="text-xs font-semibold text-red-500 uppercase tracking-wide">Problem</p>
+            <p class="text-sm text-gray-700 mt-1">
+              Query logic is spread across three layers with no consistent seam. 
+              <code>HospitalDetailSerializer.get_stats()</code> queries <code>Patient</code>, 
+              <code>Encounter</code>, and <code>Invoice</code> — the same models that 
+              <code>dashboard_service.read_platform_stats()</code> queries. 
+              <code>HospitalDetailSerializer.get_staff_breakdown()</code> and 
+              <code>get_admin()</code> query <code>HospitalUserProfile</code> with role 
+              grouping. There is no single place to add or change hospital-related queries.
+            </p>
+          </div>
+          <div>
+            <p class="text-xs font-semibold text-green-600 uppercase tracking-wide">Solution</p>
+            <p class="text-sm text-gray-700 mt-1">
+              Extract a <code>HospitalDetailService</code> that provides <code>read_stats()</code>, 
+              <code>read_staff_breakdown()</code>, and <code>read_admin()</code>. The serializer 
+              becomes a pure data transformer — it receives pre-fetched data and formats it.
+            </p>
+          </div>
+          <div>
+            <p class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Deletion Test</p>
+            <p class="text-sm text-gray-600 mt-1">
+              If you delete the query methods from the serializers, the complexity doesn't vanish 
+              — it would need to move elsewhere. That means a real seam exists.
+            </p>
+          </div>
+        </div>
+        <div class="lg:col-span-3">
+          <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Current split (before)</p>
+          <div class="diagram-box">
+            <svg viewBox="0 0 580 360" class="w-full" xmlns="http://www.w3.org/2000/svg">
+              <!-- Layer labels -->
+              <text x="10" y="20" font-size="11" fill="#6b7280" font-weight="bold">LAYER</text>
+              <text x="130" y="20" font-size="11" fill="#6b7280" font-weight="bold">QUERIES</text>
+
+              <!-- View layer -->
+              <rect x="10" y="35" width="100" height="80" rx="8" fill="#e0f2fe" stroke="#bae6fd" stroke-width="1.5"/>
+              <text x="60" y="60" font-size="11" fill="#0369a1" text-anchor="middle" font-weight="bold">Views</text>
+              <text x="60" y="80" font-size="9" fill="#0369a1" text-anchor="middle">hospital_detail</text>
+              <text x="60" y="95" font-size="9" fill="#0369a1" text-anchor="middle">admin_overview</text>
+
+              <!-- Arrows from view to service -->
+              <line x1="110" y1="55" x2="155" y2="55" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)"/>
+              <text x="132" y="48" font-size="8" fill="#94a3b8" text-anchor="middle">stats</text>
+              <line x1="110" y1="95" x2="155" y2="95" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)"/>
+              <text x="132" y="108" font-size="8" fill="#94a3b8" text-anchor="middle">stats</text>
+
+              <!-- Service layer -->
+              <rect x="160" y="35" width="150" height="80" rx="8" fill="#dcfce7" stroke="#bbf7d0" stroke-width="1.5"/>
+              <text x="235" y="60" font-size="11" fill="#166534" text-anchor="middle" font-weight="bold">dashboard_service</text>
+              <text x="235" y="80" font-size="9" fill="#166534" text-anchor="middle">read_platform_stats()</text>
+              <text x="235" y="95" font-size="9" fill="#166534" text-anchor="middle">read_overview()</text>
+
+              <!-- Arrow from service to models -->
+              <line x1="310" y1="55" x2="355" y2="55" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)"/>
+              <line x1="310" y1="75" x2="355" y2="75" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+              <!-- Models -->
+              <rect x="360" y="35" width="80" height="80" rx="8" fill="#fce7f3" stroke="#fbcfe8" stroke-width="1.5"/>
+              <text x="400" y="60" font-size="11" fill="#be185d" text-anchor="middle" font-weight="bold">Models</text>
+              <text x="400" y="80" font-size="9" fill="#be185d" text-anchor="middle">Patient</text>
+              <text x="400" y="95" font-size="9" fill="#be185d" text-anchor="middle">Encounter</text>
+              <text x="400" y="110" font-size="9" fill="#be185d" text-anchor="middle">Invoice</text>
+
+              <!-- Serializer layer (parallel to service, same model queries) -->
+              <rect x="10" y="130" width="100" height="70" rx="8" fill="#fef3c7" stroke="#fde68a" stroke-width="1.5"/>
+              <text x="60" y="155" font-size="11" fill="#92400e" text-anchor="middle" font-weight="bold">Serializers</text>
+              <text x="60" y="175" font-size="9" fill="#92400e" text-anchor="middle">get_stats()</text>
+              <text x="60" y="190" font-size="9" fill="#92400e" text-anchor="middle">get_admin()</text>
+
+              <!-- Serializer also queries models directly! -->
+              <line x1="110" y1="165" x2="360" y2="70" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="5,3"/>
+              <text x="235" y="145" font-size="9" fill="#d97706" text-anchor="middle">DIRECT DB QUERIES ✗</text>
+
+              <!-- Same models -->
+              <rect x="360" y="130" width="80" height="40" rx="8" fill="#fce7f3" stroke="#fbcfe8" stroke-width="1.5"/>
+              <text x="400" y="155" font-size="11" fill="#be185d" text-anchor="middle" font-weight="bold">Models</text>
+
+              <!-- Arrow defs -->
+              <defs>
+                <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+                  <path d="M0,0 L10,5 L0,10 Z" fill="#94a3b8"/>
+                </marker>
+              </defs>
+            </svg>
+          </div>
+          <p class="text-xs text-gray-400 mt-2">Serializers bypass the service layer and query models directly, duplicating query logic.</p>
+          
+          <!-- After diagram -->
+          <div class="mt-4 p-3 bg-emerald-50 rounded-lg border border-emerald-200">
+            <p class="text-xs text-emerald-700 font-semibold mb-2">✓ After: serializers receive data, don't query it</p>
+            <svg viewBox="0 0 580 200" class="w-full mt-2" xmlns="http://www.w3.org/2000/svg">
+              <!-- View -->
+              <rect x="10" y="10" width="100" height="60" rx="8" fill="#e0f2fe" stroke="#bae6fd" stroke-width="1.5"/>
+              <text x="60" y="35" font-size="11" fill="#0369a1" text-anchor="middle" font-weight="bold">View</text>
+              <text x="60" y="55" font-size="9" fill="#0369a1" text-anchor="middle">hospital_detail</text>
+
+              <!-- Arrow -->
+              <line x1="110" y1="40" x2="155" y2="40" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow2)"/>
+
+              <!-- NEW: HospitalDetailService -->
+              <rect x="160" y="10" width="170" height="60" rx="8" fill="#dcfce7" stroke="#bbf7d0" stroke-width="2"/>
+              <text x="245" y="30" font-size="11" fill="#166534" text-anchor="middle" font-weight="bold">HospitalDetailService</text>
+              <text x="245" y="48" font-size="9" fill="#166534" text-anchor="middle">read_stats()</text>
+              <text x="245" y="62" font-size="9" fill="#166534" text-anchor="middle">read_staff_breakdown()</text>
+
+              <!-- Arrow to models -->
+              <line x1="330" y1="25" x2="375" y2="25" stroke="#94a3b8" stroke-width="1.5"/>
+              <line x1="330" y1="55" x2="375" y2="55" stroke="#94a3b8" stroke-width="1.5"/>
+
+              <!-- Models -->
+              <rect x="380" y="10" width="80" height="60" rx="8" fill="#fce7f3" stroke="#fbcfe8" stroke-width="1.5"/>
+              <text x="420" y="35" font-size="11" fill="#be185d" text-anchor="middle" font-weight="bold">Models</text>
+
+              <!-- Serializer receives data (arrow from service to serializer) -->
+              <line x1="245" y1="70" x2="245" y2="95" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="3,3" marker-end="url(#arrow2)"/>
+              
+              <rect x="160" y="100" width="170" height="50" rx="8" fill="#fef3c7" stroke="#fde68a" stroke-width="1.5"/>
+              <text x="245" y="120" font-size="11" fill="#92400e" text-anchor="middle" font-weight="bold">Serializer</text>
+              <text x="245" y="138" font-size="9" fill="#92400e" text-anchor="middle">transforms data, doesn't query</text>
+
+              <!-- Arrow from serializer to view -->
+              <line x1="160" y1="125" x2="110" y2="60" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="3,3" marker-end="url(#arrow2)"/>
+
+              <defs>
+                <marker id="arrow2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+                  <path d="M0,0 L10,5 L0,10 Z" fill="#94a3b8"/>
+                </marker>
+              </defs>
+            </svg>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── CANDIDATE 3 ──────────────────────────────────────────────────── -->
+    <div class="card bg-white rounded-2xl border border-gray-200 p-6 mb-6">
+      <div class="flex items-start justify-between mb-4">
+        <div>
+          <span class="badge-explore text-xs font-semibold px-3 py-1 rounded-full">Worth exploring</span>
+          <h2 class="text-xl font-bold text-gray-900 mt-2">Admin user creation is inline business logic in a view</h2>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 lg:grid-cols-5 gap-4">
+        <div class="lg:col-span-2 space-y-3">
+          <div>
+            <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide">Files</p>
+            <div class="mt-1 space-y-1">
+              <span class="file inline-block bg-gray-100 text-gray-700 px-2 py-0.5 rounded">backend/medos_internal/views.py</span>
+            </div>
+          </div>
+          <div>
+            <p class="text-xs font-semibold text-red-500 uppercase tracking-wide">Problem</p>
+            <p class="text-sm text-gray-700 mt-1">
+              <code>HospitalAdminViewSet.create()</code> has ~30 lines of transactional 
+              business logic: creating a Django user, fetching a hospital, fetching or 
+              creating a role, creating a HospitalUserProfile. Error handling is a broad 
+              <code>except Exception</code> that catches everything. This is the last 
+              remaining inline business-logic-in-a-view since <code>onboard_hospital()</code> 
+              was extracted to a service.
+            </p>
+          </div>
+          <div>
+            <p class="text-xs font-semibold text-green-600 uppercase tracking-wide">Solution</p>
+            <p class="text-sm text-gray-700 mt-1">
+              Extract to a <code>UserService.create_admin_user()</code> in a new 
+              <code>services/user_management.py</code> module. The view becomes 
+              a thin 3-line adapter.
+            </p>
+          </div>
+          <div>
+            <p class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Current code</p>
+            <div class="mt-1 bg-gray-50 rounded-lg p-2 text-xs font-mono leading-relaxed">
+              <span class="text-gray-900">def create(self, request):</span><br/>
+              <span class="text-gray-900">  serializer = ...</span><br/>
+              <span class="text-gray-900">  <span class="text-amber-600">with transaction.atomic():</span></span><br/>
+              <span class="text-gray-900">    user = User.objects.create_user(...)</span><br/>
+              <span class="text-gray-900">    hospital = Hospital.objects.get(...)</span><br/>
+              <span class="text-gray-900">    role = Role.objects.get(...)</span><br/>
+              <span class="text-gray-900">    HospitalUserProfile.objects.create(...)</span><br/>
+              <span class="text-red-500">  except Exception:  ← too broad</span><br/>
+              <span class="text-gray-900">    return Response({'error': str(e)},</span><br/>
+              <span class="text-gray-900">      status=400)</span>
+            </div>
+          </div>
+        </div>
+        <div class="lg:col-span-3">
+          <div class="diagram-box">
+            <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">Architecture inconsistency</p>
+            <div class="grid grid-cols-2 gap-4">
+              <div class="bg-white rounded-lg p-4 border border-emerald-200">
+                <p class="text-xs font-semibold text-emerald-700 mb-2">✓ <code>onboard_hospital()</code></p>
+                <p class="text-xs text-gray-600">Extracted to service</p>
+                <div class="mt-2 text-xs font-mono text-emerald-700">
+                  services/hospital_onboarding.py
+                </div>
+                <div class="mt-2 text-xs text-gray-500">
+                  Clean transaction boundary. 9 unit tests. View is 24 lines.
+                </div>
+              </div>
+              <div class="bg-white rounded-lg p-4 border border-red-200">
+                <p class="text-xs font-semibold text-red-700">✗ <code>HospitalAdminViewSet.create()</code></p>
+                <p class="text-xs text-gray-600">Still inline in view</p>
+                <div class="mt-2 text-xs font-mono text-red-600">
+                  views.py (line ~130)
+                </div>
+                <div class="mt-2 text-xs text-gray-500">
+                  No service layer. 0 unit tests. Caught by broad <code>except</code>.
+                </div>
+              </div>
+            </div>
+            <div class="mt-4 text-xs text-gray-500">
+              <strong>Pattern broken:</strong> The project now has a well-established pattern of extracting 
+              transactional workflows into service modules (<code>dashboard</code>, 
+              <code>hospital_onboarding</code>, <code>admin_crud</code>). The admin user creation 
+              is the only place that doesn't follow it.
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── CANDIDATE 4 ──────────────────────────────────────────────────── -->
+    <div class="card bg-white rounded-2xl border border-gray-200 p-6 mb-6">
+      <div class="flex items-start justify-between mb-4">
+        <div>
+          <span class="badge-explore text-xs font-semibold px-3 py-1 rounded-full">Worth exploring</span>
+          <h2 class="text-xl font-bold text-gray-900 mt-2">No pagination on hospitals list</h2>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 lg:grid-cols-5 gap-4">
+        <div class="lg:col-span-2 space-y-3">
+          <div>
+            <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide">Files</p>
+            <div class="mt-1 space-y-1">
+              <span class="file inline-block bg-gray-100 text-gray-700 px-2 py-0.5 rounded">backend/medos_internal/views.py</span>
+              <span class="file inline-block bg-gray-100 text-gray-700 px-2 py-0.5 rounded">backend/medos_internal/serializers.py</span>
+            </div>
+          </div>
+          <div>
+            <p class="text-xs font-semibold text-red-500 uppercase tracking-wide">Problem</p>
+            <p class="text-sm text-gray-700 mt-1">
+              <code>hospital_list</code> returns all hospitals with no limit. The serializer 
+              then runs <strong>N×2 additional queries</strong> — one for <code>get_admin_email()</code> 
+              and one for <code>get_admin_name()</code>, each doing a separate 
+              <code>HospitalUserProfile</code> lookup per hospital. With 50 hospitals that's 
+              102 SQL queries for one request.
+            </p>
+          </div>
+          <div>
+            <p class="text-xs font-semibold text-green-600 uppercase tracking-wide">Solution</p>
+            <p class="text-sm text-gray-700 mt-1">
+              Add DRF <code>PageNumberPagination</code> (e.g. page_size=20). Consolidate 
+              the two admin queries into one prefetch in the view.
+            </p>
+          </div>
+        </div>
+        <div class="lg:col-span-3">
+          <div class="diagram-box">
+            <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Current query pattern per hospital list request</p>
+            <svg viewBox="0 0 520 180" class="w-full" xmlns="http://www.w3.org/2000/svg">
+              <!-- 1st query -->
+              <rect x="10" y="10" width="200" height="30" rx="6" fill="#e0f2fe" stroke="#bae6fd" stroke-width="1"/>
+              <text x="110" y="30" font-size="11" fill="#0369a1" text-anchor="middle">SELECT hospitals (1 query)</text>
+
+              <!-- N+2 pattern -->
+              <rect x="10" y="55" width="200" height="30" rx="6" fill="#fef3c7" stroke="#fde68a" stroke-width="1"/>
+              <text x="110" y="75" font-size="11" fill="#92400e" text-anchor="middle">get_admin_email() → N queries</text>
+
+              <rect x="10" y="100" width="200" height="30" rx="6" fill="#fef3c7" stroke="#fde68a" stroke-width="1"/>
+              <text x="110" y="120" font-size="11" fill="#92400e" text-anchor="middle">get_admin_name() → N queries</text>
+
+              <!-- Total -->
+              <rect x="240" y="10" width="160" height="120" rx="8" fill="#fce7f3" stroke="#fbcfe8" stroke-width="1.5"/>
+              <text x="320" y="35" font-size="13" fill="#be185d" text-anchor="middle" font-weight="bold">Total</text>
+              <text x="320" y="60" font-size="22" fill="#be185d" text-anchor="middle" font-weight="bold">1 + 2N</text>
+              <text x="320" y="85" font-size="10" fill="#be185d" text-anchor="middle">N=50 hospitals</text>
+              <text x="320" y="105" font-size="14" fill="#be185d" text-anchor="middle" font-weight="bold">101 queries</text>
+            </svg>
+            <div class="mt-3 bg-gray-50 rounded-lg p-2.5 border border-gray-200">
+              <p class="text-xs text-gray-600">
+                <strong>Fix:</strong> Add <code>Prefetch('staff_profiles__role')</code> and compute 
+                admin email + name in Python. Drop the two <code>SerializerMethodField</code> queries.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════════════════════════════ -->
+    <!--  TOP RECOMMENDATION                                                 -->
+    <!-- ════════════════════════════════════════════════════════════════════ -->
+    <div class="bg-gradient-to-r from-emerald-50 to-emerald-100 rounded-2xl border border-emerald-300 p-6 mt-8">
+      <div class="flex items-start gap-4">
+        <div class="w-10 h-10 rounded-xl bg-emerald-600 flex items-center justify-center shrink-0 mt-0.5">
+          <span class="text-white font-bold text-lg">→</span>
+        </div>
+        <div>
+          <h2 class="text-lg font-bold text-emerald-900">Top recommendation</h2>
+          <p class="text-emerald-800 mt-1">
+            <strong>Fix the dashboard URL bug first</strong> — it's a production bug that makes 
+            the AdminDashboard page always show an error state. It's a one-line fix per endpoint 
+            (3 total) with zero risk. 
+          </p>
+          <p class="text-emerald-700 mt-2 text-sm">
+            Then <strong>extract HospitalDetail service</strong> — it addresses the deepest friction: 
+            query logic fragmented across layers. The deletion test passes: removing queries from 
+            serializers would not make complexity vanish. And it follows the established pattern
+            (dashboard_service, hospital_onboarding_service, admin_crud).
+          </p>
+          <p class="text-emerald-600 mt-2 text-sm">
+            The admin user creation extraction and pagination are both worthwhile but lower 
+            priority — the mutation at least works, and the N+2 query only hurts at scale.
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <div class="mt-8 text-center text-xs text-gray-400">
+      Generated by the improve-codebase-architecture skill · medos_internal_frontend · Round 3
+    </div>
+  </div>
+</body>
+</html>

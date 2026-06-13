@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MedOS Internal — Architecture Review Round 2</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+    body { font-family: 'Inter', sans-serif; }
+    code, pre { font-family: 'JetBrains Mono', monospace; }
+    .card { @apply bg-white rounded-xl border border-gray-200 p-6; }
+    .badge-done { @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-700; }
+    .badge-future { @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-700; }
+    .badge-info { @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-700; }
+    .file { @apply font-mono text-sm bg-gray-100 px-1.5 py-0.5 rounded; }
+  </style>
+</head>
+<body class="bg-gray-50 text-gray-900 antialiased">
+
+  <div class="max-w-5xl mx-auto px-4 py-12">
+
+    <!-- ═══════════ HEADER ═══════════ -->
+    <div class="mb-10">
+      <div class="flex items-center gap-3 mb-2">
+        <span class="text-xs font-semibold bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full">2026-06-11</span>
+        <span class="text-xs font-semibold bg-[#0A6253]/10 text-[#0A6253] px-2 py-0.5 rounded-full">Round 2</span>
+      </div>
+      <h1 class="text-3xl font-bold text-gray-900">MedOS Internal — Architecture Review</h1>
+      <p class="text-gray-500 mt-2 text-lg">All 6 candidates from v1/v2 resolved. Current baseline and next opportunities.</p>
+    </div>
+
+    <!-- ═══════════ SCORECARD ═══════════ -->
+    <div class="card mb-8">
+      <h2 class="font-semibold text-gray-900 mb-4">Scorecard — 6/6 candidates resolved</h2>
+      <div class="overflow-hidden rounded-lg border border-gray-200">
+        <table class="min-w-full text-sm">
+          <thead class="bg-gray-50">
+            <tr>
+              <th class="text-left px-4 py-2 font-semibold text-gray-600">Candidate</th>
+              <th class="text-left px-4 py-2 font-semibold text-gray-600">What was done</th>
+              <th class="text-center px-4 py-2 font-semibold text-gray-600">Status</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-200">
+            <tr>
+              <td class="px-4 py-3 font-medium"><code>platform_stats</code> duplicate</td>
+              <td class="px-4 py-3 text-gray-600">Replaced 6 direct queries with <code class="file">dashboard_service.read_platform_stats()</code>. View shrunk 18→3 lines.</td>
+              <td class="px-4 py-3 text-center"><span class="badge-done">Done</span></td>
+            </tr>
+            <tr class="bg-gray-50/50">
+              <td class="px-4 py-3 font-medium">Dashboard frontend consumer</td>
+              <td class="px-4 py-3 text-gray-600">9 TypeScript types + 3 API methods + <code class="file">AdminDashboard.tsx</code> (3 tabs) + route + nav link. Builds clean.</td>
+              <td class="px-4 py-3 text-center"><span class="badge-done">Done</span></td>
+            </tr>
+            <tr>
+              <td class="px-4 py-3 font-medium">Lazy <code>User</code> import</td>
+              <td class="px-4 py-3 text-gray-600">Moved <code>get_user_model()</code> to top of <code class="file">dashboard.py</code>. No circular dep existed.</td>
+              <td class="px-4 py-3 text-center"><span class="badge-done">Done</span></td>
+            </tr>
+            <tr class="bg-gray-50/50">
+              <td class="px-4 py-3 font-medium">No frontend tests</td>
+              <td class="px-4 py-3 text-gray-600">Vitest + RTL + jsdom. 10 tests across Login (3), Stats (5), smoke (2). 3 test files.</td>
+              <td class="px-4 py-3 text-center"><span class="badge-done">Done</span></td>
+            </tr>
+            <tr>
+              <td class="px-4 py-3 font-medium"><code>StorageMetrics</code> FK — expanded to all FKs</td>
+              <td class="px-4 py-3 text-gray-600">Added <code>db_constraint=False</code> to all 18 <code>ForeignKey(Hospital)</code> fields across managed + unmanaged models.</td>
+              <td class="px-4 py-3 text-center"><span class="badge-done">Done</span></td>
+            </tr>
+            <tr class="bg-gray-50/50">
+              <td class="px-4 py-3 font-medium">Mixed GET/POST <code>hospital_list</code></td>
+              <td class="px-4 py-3 text-gray-600">Split into <code>hospital_list</code> (GET) + <code>hospital_create</code> (POST). Create workflow extracted into <code class="file">services/hospital_onboarding.py</code> with 9 tests.</td>
+              <td class="px-4 py-3 text-center"><span class="badge-done">Done</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ═══════════ BEFORE / AFTER ═══════════ -->
+    <div class="card mb-8">
+      <h2 class="font-semibold text-gray-900 mb-4">Before / After metrics</h2>
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div class="bg-emerald-50 rounded-lg p-4 border border-emerald-200">
+          <div class="text-2xl font-bold text-emerald-700">11 → 3</div>
+          <div class="text-sm text-emerald-600 font-medium">Dashboard endpoints</div>
+          <div class="text-xs text-emerald-500 mt-1">Collapsed via <code class="file">DashboardService</code></div>
+        </div>
+        <div class="bg-emerald-50 rounded-lg p-4 border border-emerald-200">
+          <div class="text-2xl font-bold text-emerald-700">9 → 0</div>
+          <div class="text-sm text-emerald-600 font-medium">Inline ViewSet classes</div>
+          <div class="text-xs text-emerald-500 mt-1">Replaced by <code class="file">make_admin_viewset()</code> factory</div>
+        </div>
+        <div class="bg-emerald-50 rounded-lg p-4 border border-emerald-200">
+          <div class="text-2xl font-bold text-emerald-700">0 → 50</div>
+          <div class="text-sm text-emerald-600 font-medium">Total tests</div>
+          <div class="text-xs text-emerald-500 mt-1">40 backend + 10 frontend</div>
+        </div>
+        <div class="bg-amber-50 rounded-lg p-4 border border-amber-200">
+          <div class="text-2xl font-bold text-amber-700">417 → 361</div>
+          <div class="text-sm text-amber-600 font-medium"><code>views.py</code> lines</div>
+          <div class="text-xs text-amber-500 mt-1">Removed 11 views, extracted onboard workflow</div>
+        </div>
+        <div class="bg-amber-50 rounded-lg p-4 border border-amber-200">
+          <div class="text-2xl font-bold text-amber-700">0 → 161</div>
+          <div class="text-sm text-amber-600 font-medium">Service layer lines</div>
+          <div class="text-xs text-amber-500 mt-1"><code class="file">dashboard.py</code> + <code class="file">admin_crud.py</code> + <code class="file">hospital_onboarding.py</code></div>
+        </div>
+        <div class="bg-amber-50 rounded-lg p-4 border border-amber-200">
+          <div class="text-2xl font-bold text-amber-700">18 FKs</div>
+          <div class="text-sm text-amber-600 font-medium"><code>db_constraint=False</code></div>
+          <div class="text-xs text-amber-500 mt-1">Consistent across all managed + unmanaged models</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════════ CURRENT STATE ═══════════ -->
+    <div class="card mb-8">
+      <h2 class="font-semibold text-gray-900 mb-4">Current architecture (all directories &amp; responsibilities)</h2>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6 text-sm">
+
+        <div>
+          <h3 class="font-semibold text-gray-700 mb-2 uppercase tracking-wider">Backend</h3>
+          <ul class="space-y-1">
+            <li><span class="file">views.py</span> — 361 lines, thin adapter views</li>
+            <li><span class="file">serializers.py</span> — 176 lines, 11 ViewSets + dashboard serializers</li>
+            <li><span class="file">models.py</span> — 401 lines, 18 unmanaged models, all FKs with <code>db_constraint=False</code></li>
+            <li><span class="file">urls.py</span> — 27 lines, 17 routes</li>
+            <li><span class="file">permissions.py</span> — <code>IsStaffUser</code>, <code>get_hospital_from_user()</code></li>
+            <li><span class="file">auth.py</span> — <code>ExpiringTokenAuthentication</code> (7-day TTL)</li>
+            <li><span class="file">services/dashboard.py</span> — 372 lines, 4 public methods</li>
+            <li><span class="file">services/admin_crud.py</span> — 84 lines, factory + <code>HospitalScopedViewSet</code></li>
+            <li><span class="file">services/hospital_onboarding.py</span> — 77 lines, transactional create</li>
+            <li><span class="file">tests/</span> — 783 lines, 40 tests (31 dashboard + 9 onboarding)</li>
+          </ul>
+        </div>
+
+        <div>
+          <h3 class="font-semibold text-gray-700 mb-2 uppercase tracking-wider">Frontend</h3>
+          <ul class="space-y-1">
+            <li><span class="file">pages/Login.tsx</span> — auth form with error + navigation</li>
+            <li><span class="file">pages/Stats.tsx</span> — platform KPIs (loading/error/success)</li>
+            <li><span class="file">pages/AdminDashboard.tsx</span> — 3 tabs (Overview/Activity/Alerts)</li>
+            <li><span class="file">pages/HospitalsDashboard.tsx</span> — hospital list + create modal</li>
+            <li><span class="file">pages/HospitalDetail.tsx</span> — single hospital view</li>
+            <li><span class="file">pages/NewHospitalWizard.tsx</span> — multi-step onboarding</li>
+            <li><span class="file">api/internalApi.ts</span> — 7 API methods + 15 TypeScript types</li>
+            <li><span class="file">test/</span> — 3 test files, 10 tests</li>
+          </ul>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- ═══════════ WHAT WAS LEARNED ═══════════ -->
+    <div class="card mb-8 border-blue-200 bg-blue-50/50">
+      <h2 class="font-semibold text-gray-900 mb-3">What was learned</h2>
+      <div class="space-y-3 text-sm text-gray-700">
+
+        <div class="bg-white rounded-lg p-4 border border-blue-100">
+          <div class="flex items-center gap-2 mb-1">
+            <span class="badge-info">Lesson</span>
+            <span class="font-medium">The lazy User import was cargo-culted</span>
+          </div>
+          <p>A <code># Late import to avoid circular dependency</code> comment sat in <code class="file">dashboard.py</code> for weeks. No circular dep existed — <code class="file">models.py</code> never imports from <code class="file">dashboard.py</code>, and <code class="file">views.py</code> imports both. The pattern was copied from an earlier setup where the dep <em>was</em> real. Moving the import to the top of the file is safer and clearer.</p>
+        </div>
+
+        <div class="bg-white rounded-lg p-4 border border-blue-100">
+          <div class="flex items-center gap-2 mb-1">
+            <span class="badge-info">Lesson</span>
+            <span class="font-medium"><code>related_name='+'</code> breaks <code>getattr</code>-based access</span>
+          </div>
+          <p>The hospital scoping bug (<code>get_hospital_from_user()</code> always returning <code>None</code>) was caused by <code>HospitalUserProfile.user = ForeignKey(related_name='+')</code>. With <code>related_name='+'</code>, Django doesn't create a reverse relation, so <code>getattr(user, 'hospital_profile', None)</code> silently returned <code>None</code>. Fix: direct query with <code>select_related</code> instead of trusting <code>getattr</code>.</p>
+        </div>
+
+        <div class="bg-white rounded-lg p-4 border border-blue-100">
+          <div class="flex items-center gap-2 mb-1">
+            <span class="badge-info">Lesson</span>
+            <span class="font-medium">SQLite FK constraints still block <code>schema_editor.create_model()</code></span>
+          </div>
+          <p>Even after adding <code>db_constraint=False</code> to all FKs, Django's schema editor still failed during test database creation on SQLite. Root cause: SQLite has limited transactional DDL support — <code>CREATE TABLE</code> inside a transaction with FK enforcement raises <code>NotSupportedError</code>. Solution: raw <code>CREATE TABLE IF NOT EXISTS</code> with <code>PRAGMA foreign_keys = OFF</code>.</p>
+        </div>
+
+        <div class="bg-white rounded-lg p-4 border border-blue-100">
+          <div class="flex items-center gap-2 mb-1">
+            <span class="badge-info">Lesson</span>
+            <span class="font-medium"><code>vi.clearAllMocks()</code> vs <code>vi.resetAllMocks()</code></span>
+          </div>
+          <p>Frontend tests using <code>mockReturnValueOnce</code> (for promise-based loading state) would infect subsequent tests. <code>clearAllMocks</code> resets call history but keeps return-value behavior. <code>resetAllMocks</code> also clears implementations. Switching fixed cross-test pollution in the Stats test suite.</p>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- ═══════════ REMAINING / FUTURE ═══════════ -->
+    <div class="card mb-6">
+      <div class="flex items-start justify-between mb-4">
+        <div>
+          <span class="badge-future">Next</span>
+          <h2 class="text-xl font-bold mt-2">Remaining gaps &amp; speculative improvements</h2>
+        </div>
+      </div>
+
+      <div class="overflow-hidden rounded-lg border border-gray-200">
+        <table class="min-w-full text-sm">
+          <thead class="bg-gray-50">
+            <tr>
+              <th class="text-left px-4 py-2 font-semibold text-gray-600">Opportunity</th>
+              <th class="text-left px-4 py-2 font-semibold text-gray-600">What it is</th>
+              <th class="text-center px-4 py-2 font-semibold text-gray-600">Risk / Effort</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-200">
+            <tr>
+              <td class="px-4 py-3 font-medium">Frontend test gap</td>
+              <td class="px-4 py-3 text-gray-600">10 tests exist. 6 more pages (<code>HospitalDetail</code>, <code>AdminDashboard</code> tabs, <code>NewHospitalWizard</code>) have 0 coverage. The wizard's multi-step form is the highest-risk.</td>
+              <td class="px-4 py-3 text-center"><span class="badge-info">Low</span> / <span class="badge-info">Medium</span></td>
+            </tr>
+            <tr class="bg-gray-50/50">
+              <td class="px-4 py-3 font-medium"><code>Stats.tsx</code> <code>platform_stats</code> endpoint still exists</td>
+              <td class="px-4 py-3 text-gray-600">The old flat KPI endpoint was kept for backwards compat. Could be deprecated in favour of <code>dashboard_service.read_overview()['kpis']</code>. The frontend currently hits both.</td>
+              <td class="px-4 py-3 text-center"><span class="badge-info">Low</span> / <span class="badge-info">Low</span></td>
+            </tr>
+            <tr>
+              <td class="px-4 py-3 font-medium">No frontend API error boundary</td>
+              <td class="px-4 py-3 text-gray-600">The 401 interceptor in <code>client.ts</code> handles auth errors, but there's no global error boundary or toast system for non-auth API failures (500s, network errors).</td>
+              <td class="px-4 py-3 text-center"><span class="badge-info">Low</span> / <span class="badge-info">Low</span></td>
+            </tr>
+            <tr class="bg-gray-50/50">
+              <td class="px-4 py-3 font-medium">Duplicate <code>CreateHospitalWizard</code>?</td>
+              <td class="px-4 py-3 text-gray-600"><code>NewHospitalWizard.tsx</code> creates hospitals via the old mixed POST endpoint. Now that the endpoint is <code>/hospitals/create/</code>, the wizard still works — but it bypasses the new <code>HospitalOnboardingService</code> transactional boundary (the service is only called from the view).</td>
+              <td class="px-4 py-3 text-center"><span class="badge-info">Low</span> / <span class="badge-info">Low</span></td>
+            </tr>
+            <tr>
+              <td class="px-4 py-3 font-medium">No E2E / integration tests</td>
+              <td class="px-4 py-3 text-gray-600">50 unit tests. Zero tests that exercise the full stack (backend + DB + frontend). Critical flows like login → dashboard → hospital list have no integration coverage.</td>
+              <td class="px-4 py-3 text-center"><span class="badge-info">Medium</span> / <span class="badge-info">High</span></td>
+            </tr>
+            <tr class="bg-gray-50/50">
+              <td class="px-4 py-3 font-medium">Token auth — no refresh mechanism</td>
+              <td class="px-4 py-3 text-gray-600">The <code>ExpiringTokenAuthentication</code> rejects expired tokens. But there's no refresh-token flow — users get logged out with no warning. The frontend has no middleware to catch 401 and redirect gracefully.</td>
+              <td class="px-4 py-3 text-center"><span class="badge-info">Medium</span> / <span class="badge-info">Low</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ═══════════ TOP RECOMMENDATION ═══════════ -->
+    <div class="card border-emerald-300 bg-emerald-50">
+      <div class="flex items-center gap-2 mb-3">
+        <span class="text-emerald-600 font-bold text-sm uppercase tracking-wider">Next move</span>
+      </div>
+      <h2 class="text-xl font-bold text-emerald-900 mb-2">Cover the highest-risk UI: <code>NewHospitalWizard</code></h2>
+      <p class="text-emerald-800 text-sm">
+        The wizard is the most complex frontend component in the app — multi-step form with conditional
+        fields, validation, and a POST to <code>/hospitals/create/</code>. It has zero test coverage.
+        A single Vitest + RTL test that walks through all 3 steps and verifies the POST payload would
+        catch regressions faster than any manual QA.
+      </p>
+      <p class="text-emerald-700 text-sm mt-2">
+        Second: add an <code>AxiosError</code>-aware toast/notification system so the frontend surfaces
+        500 errors instead of silently failing.
+      </p>
+    </div>
+
+  </div>
+
+</body>
+</html>
